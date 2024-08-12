@@ -2,6 +2,11 @@ import discord
 from discord.ext import commands
 import csv
 import os
+from dotenv import load_dotenv
+
+# 環境変数からトークンを読み込む
+load_dotenv()
+TOKEN = os.getenv('DISCORD_BOT_TOKEN')  # トークンを取得する
 
 # インテントを定義
 intents = discord.Intents.default()
@@ -86,4 +91,4 @@ async def create_channels_from_csv(interaction, file_path):
     await interaction.edit(content=f'{created_channels}個のチャンネルを作成しました')
 
 # Botを起動
-bot.run('MTI3MjMxNjA0NDc0ODI1OTQxOA.GMR2bf.WBfMuZ5BjksTDQVBfC9meE_XqzgeXqJc6ixTow')
+bot.run(TOKEN)
