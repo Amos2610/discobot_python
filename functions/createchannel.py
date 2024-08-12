@@ -1,6 +1,8 @@
 import discord
 from discord.ext import commands
 import csv
+import os
+import asyncio
 
 class CreateChannels(commands.Cog):
     """
@@ -15,7 +17,7 @@ class CreateChannels(commands.Cog):
     def __init__(self, bot):
         self.bot = bot # Botのインスタンス
         # 新しいCSVファイルを読み込むかどうかを示すフラグ(True: 新しいCSVファイルを読み込む, False: 既存のCSVファイルを読み込む)
-        self.is_need_csv = False
+        self.is_need_csv = True
 
     @discord.app_commands.command(name="createchannels", description="CSVファイルからチャンネルを作成します")
     async def createchannels(self, interaction: discord.Interaction):
@@ -34,31 +36,71 @@ class CreateChannels(commands.Cog):
             file_path = f"./{message.attachments[0].filename}"
             await message.attachments[0].save(file_path)
 
-            interaction = await message.channel.send("チャンネルを作成しています...")
-            await self.create_channels_from_csv(interaction, file_path)
+            # CSVファイルの保存確認
+            def check(msg):
+                return msg.author == message.author and msg.channel == message.channel
+
+            await message.channel.send("CSVファイルを保存しますか？ (はい/いいえ)")
+
+            try:
+                response = await self.bot.wait_for('message', check=check, timeout=60)
+            except asyncio.TimeoutError:
+                await message.channel.send("タイムアウトしました。")
+                return
+
+            if response.content.lower() == 'はい':
+                await self.save_csv(file_path, message.channel)
+            elif response.content.lower() == 'いいえ':
+                await message.channel.send("CSVファイルを保存せずに処理を続けます。")
+                await self.create_channels_from_csv(message.channel, file_path)
+            else:
+                await message.channel.send("無効な応答です。'はい' か 'いいえ' でお答えください。")
+
+    async def save_csv(self, file_path: str, channel: discord.TextChannel):
+        # csv_filesディレクトリを作成
+        os.makedirs('csv_files', exist_ok=True)
+
+        # 保存するファイル名の生成
+        base_name = 'my_channel'
+        file_count = len([f for f in os.listdir('csv_files') if f.startswith(base_name)])
+        new_file_name = f"{base_name}{file_count + 1}.csv"
+        new_file_path = os.path.join('csv_files', new_file_name)
+
+        # CSVファイルを保存
+        try:
+            os.rename(file_path, new_file_path)
+            await channel.send(f"CSVファイルを '{new_file_name}' として保存しました。")
+            await self.create_channels_from_csv(channel, new_file_path)
+        except Exception as e:
+            await channel.send(content=f'Error saving CSV file: {e}')
+
 
     # CSVファイルからチャンネルを作成する
-    async def create_channels_from_csv(self, interaction, file_path: str):
+    async def create_channels_from_csv(self, channel, file_path: str):
         # まずはUTF-8で試す
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
+                print(f"CSVファイルを読み込みます: {file_path}")
                 reader = csv.DictReader(f)
                 channels = [row for row in reader]
         except UnicodeDecodeError:
             # UTF-8で失敗した場合はShift_JISで再試行
             try:
+                print(f"UTF-8での読み込みに失敗したため、Shift_JISで再試行します: {file_path}")
                 with open(file_path, 'r', encoding='shift_jis') as f:
                     reader = csv.DictReader(f)
                     channels = [row for row in reader]
-                    await interaction.channel.send("Shift_JISでCSVファイルを読み込みました(UTF-8で読み込むことをお勧めします)")
+                    await channel.channel.send("Shift_JISでCSVファイルを読み込みました(UTF-8で読み込むことをお勧めします)")
             except Exception as e:
-                await interaction.response.send_message(content=f'Error reading CSV file: {e}')
+                print(f"Error reading CSV file: {e}")
+                await channel.send(content=f'Error reading CSV file: {e}')
                 return
         except Exception as e:
-            await interaction.response.send_message(content=f'Error reading CSV file: {e}')
+            print(f"Error reading CSV file: {e}")
+            await channel.send(content=f'Error reading CSV file: {e}')
             return
 
-        guild = interaction.guild
+        guild = channel.guild
         created_channels = 0
         skipped_channels = 0
         category_cache = {}  # カテゴリのキャッシュ
@@ -107,16 +149,16 @@ class CreateChannels(commands.Cog):
                         await guild.create_voice_channel(channel_name)
                     created_channels += 1
                 else:
-                    await interaction.response.send_message(content=f'Unsupported channel type: {channel_type}')
+                    await channel.send(content=f'Unsupported channel type: {channel_type}')
                     return
             except KeyError as e:
-                await interaction.response.send_message(content=f'CSV missing expected column: {e}')
+                await channel.send.send_message(content=f'CSV missing expected column: {e}')
                 return
             except Exception as e:
-                await interaction.response.send_message(content=f'Error creating channel: {e}')
+                await channel.send.send_message(content=f'Error creating channel: {e}')
                 return
 
-        await interaction.response.send_message(content=f'{created_channels}個のチャンネルを作成しました（{skipped_channels}個のチャンネルは既に存在するためスキップされました）')
+        await channel.send(content=f'{created_channels}個のチャンネルを作成しました（{skipped_channels}個のチャンネルは既に存在するためスキップされました）')
 
 # BotにCogを追加
 async def setup(bot):
