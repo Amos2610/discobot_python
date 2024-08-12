@@ -50,45 +50,84 @@ async def on_message(message):
         await create_channels_from_csv(interaction, file_path)
 
 async def create_channels_from_csv(interaction, file_path):
+    # まずはUTF-8で試す
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             channels = [row for row in reader]
+    except UnicodeDecodeError:
+        # UTF-8で失敗した場合はShift_JISで再試行
+        try:
+            with open(file_path, 'r', encoding='shift_jis') as f:
+                reader = csv.DictReader(f)
+                channels = [row for row in reader]
+                await interaction.channel.send("Shift_JISでCSVファイルを読み込みました(UTF-8で読み込むことをお勧めします)")
+        except Exception as e:
+            await interaction.edit(content=f'Error reading CSV file: {e}')
+            return
     except Exception as e:
         await interaction.edit(content=f'Error reading CSV file: {e}')
         return
 
     guild = interaction.guild
     created_channels = 0
+    skipped_channels = 0
+    category_cache = {}  # カテゴリのキャッシュ
+
     for row in channels:
         try:
-            category_name = row.get('Category Name')
-            channel_name = row['Channel Name']
-            channel_type = row.get('Channel Type', '').strip()  # スペースを削除
-            role_name = row.get('Role Name')
+            category_name = row.get('Category Name', '').strip()
+            channel_name = row['Channel Name'].strip()
+            channel_type = row.get('Channel Type', '').strip()
+            role_name = row.get('Role Name', None)  # ロール名はオプション
 
-            existing_channel = discord.utils.get(guild.channels, name=channel_name)
-            if existing_channel:
+            # カテゴリの取得または作成
+            if category_name:
+                if category_name not in category_cache:
+                    category = discord.utils.get(guild.categories, name=category_name)
+                    if not category:
+                        category = await guild.create_category(category_name)
+                    category_cache[category_name] = category
+                else:
+                    category = category_cache[category_name]
+            else:
+                category = None
+
+            # チャンネルの存在確認
+            existing_channel = discord.utils.get(
+                guild.channels,
+                name=channel_name,
+                category=category
+            )
+            if existing_channel and existing_channel.type == (discord.ChannelType.text if channel_type.lower() == 'text' else discord.ChannelType.voice):
+                # チャンネルの名前、カテゴリ、タイプ全て一致している場合にスキップ
+                skipped_channels += 1
                 continue
 
-            category = discord.utils.get(guild.categories, name=category_name)
-            if not category:
-                category = await guild.create_category(category_name)
-
+            # チャンネルの作成
             if channel_type.lower() == 'text':
-                await category.create_text_channel(channel_name)
+                if category:
+                    await guild.create_text_channel(channel_name, category=category)
+                else:
+                    await guild.create_text_channel(channel_name)
+                created_channels += 1
             elif channel_type.lower() == 'voice':
-                await category.create_voice_channel(channel_name)
+                if category:
+                    await guild.create_voice_channel(channel_name, category=category)
+                else:
+                    await guild.create_voice_channel(channel_name)
+                created_channels += 1
             else:
                 await interaction.edit(content=f'Unsupported channel type: {channel_type}')
                 return
-
-            created_channels += 1
         except KeyError as e:
             await interaction.edit(content=f'CSV missing expected column: {e}')
             return
+        except Exception as e:
+            await interaction.edit(content=f'Error creating channel: {e}')
+            return
 
-    await interaction.edit(content=f'{created_channels}個のチャンネルを作成しました')
+    await interaction.edit(content=f'{created_channels}個のチャンネルを作成しました（{skipped_channels}個のチャンネルは既に存在するためスキップされました）')
 
 # Botを起動
 bot.run(TOKEN)
