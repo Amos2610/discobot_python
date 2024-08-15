@@ -22,7 +22,7 @@ Discord Botで色々やるプロジェクト
 3. プログラムを実行する
    ```
    python bot.py
-   ```<br>
+   ```
 4. Discord Botのいるのサーバで以下のコマンドを打つ<br>
    - /hey: こんにちはと言わせる
    - /createchannel: csvファイルからチャンネルを追加する
